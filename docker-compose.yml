@@ -1,0 +1,52 @@
+services:
+
+  postgres:
+    image: postgres:16
+    container_name: job-agent-postgres
+    restart: unless-stopped
+
+    ports:
+      - "15432:5432"
+
+    environment:
+      POSTGRES_USER: jobagent
+      POSTGRES_PASSWORD: jobagent_local_password
+      POSTGRES_DB: jobagent
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: job-agent-n8n
+    restart: unless-stopped
+
+    ports:
+      - "5678:5678"
+
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: jobagent
+      DB_POSTGRESDB_USER: jobagent
+      DB_POSTGRESDB_PASSWORD: jobagent_local_password
+
+      N8N_HOST: localhost
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+
+      GENERIC_TIMEZONE: Asia/Kolkata
+      TZ: Asia/Kolkata
+
+    volumes:
+      - n8n_data:/home/node/.n8n
+
+    depends_on:
+      - postgres
+
+
+volumes:
+  postgres_data:
+  n8n_data:

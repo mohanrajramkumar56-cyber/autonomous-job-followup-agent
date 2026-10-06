@@ -1,0 +1,544 @@
+{
+  "name": "Telegram Follow-Up Approval Handler",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "seconds",
+              "secondsInterval": 10
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "id": "69e08692-e1a2-4112-b760-0381c18ba394",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "url": "https://api.telegram.org/bot8962515496:AAGWSfTZ__UG4KY8opv_LeM8R6T_PwXTAkU/getUpdates",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "limit",
+              "value": "100"
+            },
+            {
+              "name": "allowed_updates",
+              "value": "[\"callback_query\"]"
+            },
+            {
+              "name": "offset",
+              "value": "={{ Number($('Execute a SQL query').item.json.last_update_id) + 1 }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        448,
+        0
+      ],
+      "id": "30a118d7-7b71-4674-9e4b-e7abbfe7ec6f",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "jsCode": "const updates = $json.result || [];\n\nreturn updates\n  .filter(update => update.callback_query)\n  .map(update => {\n    const callback = update.callback_query;\n\n    const parts = String(callback.data || '').split(':');\n\n    return {\n      json: {\n        update_id: update.update_id,\n        callback_query_id: callback.id,\n\n        action: parts[0] || '',\n        application_id: parts[1] || '',\n\n        telegram_user_id: callback.from?.id || '',\n        telegram_chat_id: callback.message?.chat?.id || '',\n\n        message_id: callback.message?.message_id || '',\n\n        callback_data: callback.data || ''\n      }\n    };\n  });"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ],
+      "id": "d47a9631-8bfb-4817-b66d-8db4bcd8fb15",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT value::BIGINT AS last_update_id\nFROM telegram_bot_state\nWHERE key = 'last_update_id';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        0
+      ],
+      "id": "3e821e72-4cfc-456f-bf7e-33bb5da618e6",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "Pt5dFfUb3aFZGP3E",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n    f.id AS followup_id,\n    f.application_id,\n    f.attempt_number,\n    f.generated_subject,\n    f.generated_body,\n    f.status,\n    j.company,\n    j.role,\n    j.recipient_email,\n    j.recipient_name,\n    j.gmail_thread_id\nFROM followups f\nJOIN job_applications j\n    ON j.id = f.application_id\nWHERE f.application_id = {{ $json.application_id }}\n  AND f.status = 'PENDING'\nORDER BY f.attempt_number DESC\nLIMIT 1;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        896,
+        0
+      ],
+      "id": "faea2d2e-cb4c-48c8-8164-85b926abb424",
+      "name": "Execute a SQL query1",
+      "credentials": {
+        "postgres": {
+          "id": "Pt5dFfUb3aFZGP3E",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "d1df62cd-be7c-4ea2-918e-fc48044bdcae",
+              "leftValue": "={{ $('Code in JavaScript').item.json.action }}",
+              "rightValue": "APPROVE",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            },
+            {
+              "id": "912e6240-a543-4fa0-898d-71426c3979ce",
+              "leftValue": "={{ String($('Code in JavaScript').item.json.telegram_user_id) }}",
+              "rightValue": "1693532806",
+              "operator": {
+                "type": "string",
+                "operation": "equals",
+                "name": "filter.operator.equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1120,
+        0
+      ],
+      "id": "94731e3e-f013-42f8-a335-b08985fbf765",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE followups\nSET\n    status = 'APPROVING',\n    approved_at = CURRENT_TIMESTAMP\nWHERE id = {{ $json.followup_id }}\n  AND status = 'PENDING'\nRETURNING\n    id AS followup_id,\n    application_id,\n    attempt_number,\n    generated_subject,\n    generated_body,\n    status,\n    approved_at;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1344,
+        -96
+      ],
+      "id": "8bf571f5-a03d-42df-aacf-0b73bcae11dd",
+      "name": "Execute a SQL query2",
+      "credentials": {
+        "postgres": {
+          "id": "Pt5dFfUb3aFZGP3E",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n    f.id AS followup_id,\n    f.application_id,\n    f.attempt_number,\n    f.generated_subject,\n    f.generated_body,\n    f.status,\n    j.company,\n    j.role,\n    j.recipient_email,\n    j.recipient_name,\n    j.gmail_thread_id\nFROM followups f\nJOIN job_applications j\n    ON j.id = f.application_id\nWHERE f.id = {{ $json.followup_id }}\n  AND f.status = 'APPROVING';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1568,
+        -96
+      ],
+      "id": "153ac83b-428d-4d4d-88f7-01bddff316a6",
+      "name": "Execute a SQL query3",
+      "credentials": {
+        "postgres": {
+          "id": "Pt5dFfUb3aFZGP3E",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "thread",
+        "operation": "get",
+        "threadId": "={{ $json.gmail_thread_id }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1792,
+        -96
+      ],
+      "id": "654a2ac2-d324-42a7-9720-a764d0e8e4ab",
+      "name": "Get a thread",
+      "webhookId": "c6829616-03a1-4e2a-a3af-2766ba07e424",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "UPicGKB2y8HA9tgM",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n  const thread = item.json;\n  const messages = thread.messages || [];\n\n  if (!messages.length) {\n    return {\n      json: {\n        ...thread,\n        reply_message_id: '',\n        reply_thread_id: thread.id || '',\n        reply_ready: false\n      }\n    };\n  }\n\n  // Select the latest message in the Gmail thread\n  const latestMessage = messages.reduce((latest, current) => {\n    return Number(current.internalDate || 0) >\n           Number(latest.internalDate || 0)\n      ? current\n      : latest;\n  });\n\n  return {\n    json: {\n      ...thread,\n      reply_message_id: latestMessage.id || '',\n      reply_thread_id: latestMessage.threadId || thread.id || '',\n      reply_ready: Boolean(latestMessage.id)\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2016,
+        -96
+      ],
+      "id": "f196d66c-3a00-4114-b189-0cd4c2681948",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "operation": "reply",
+        "messageId": "={{ $json.reply_message_id }}",
+        "emailType": "text",
+        "message": "={{ $('Execute a SQL query3').item.json.generated_body }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        2240,
+        -96
+      ],
+      "id": "19ac11ba-1d54-4bdc-a951-fe87924ca075",
+      "name": "Reply to a message",
+      "webhookId": "8662ec26-38aa-419e-a37a-5a5779bb83eb",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "UPicGKB2y8HA9tgM",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE followups\nSET\n    status = 'SENT',\n    sent_at = CURRENT_TIMESTAMP\nWHERE id = {{ $('Execute a SQL query3').item.json.followup_id }}\n  AND status = 'APPROVING'\nRETURNING *;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2464,
+        -96
+      ],
+      "id": "d904fc1d-c681-4d57-bba1-30c35f424431",
+      "name": "Mark Follow-Up as SENT",
+      "credentials": {
+        "postgres": {
+          "id": "Pt5dFfUb3aFZGP3E",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE job_applications\nSET\n    followup_count = followup_count + 1,\n    last_followup_at = CURRENT_TIMESTAMP,\n\n    next_followup_at =\n        CASE\n            WHEN followup_count + 1 = 1\n                THEN CURRENT_TIMESTAMP + INTERVAL '7 days'\n            WHEN followup_count + 1 = 2\n                THEN CURRENT_TIMESTAMP + INTERVAL '14 days'\n            WHEN followup_count + 1 >= 3\n                THEN NULL\n        END,\n\n    followup_stopped =\n        CASE\n            WHEN followup_count + 1 >= 3 THEN TRUE\n            ELSE FALSE\n        END,\n\n    updated_at = CURRENT_TIMESTAMP\n\nWHERE id = {{ $('Execute a SQL query3').item.json.application_id }}\n\nRETURNING\n    id,\n    company,\n    role,\n    followup_count,\n    last_followup_at,\n    next_followup_at,\n    followup_stopped;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2688,
+        -96
+      ],
+      "id": "7915682a-b752-4a36-a94d-f34ec2896e0d",
+      "name": "Update Application Follow-Up State",
+      "credentials": {
+        "postgres": {
+          "id": "Pt5dFfUb3aFZGP3E",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE job_applications\nSET\n    followup_count = 1,\n    next_followup_at = last_followup_at + INTERVAL '7 days',\n    followup_stopped = FALSE,\n    updated_at = CURRENT_TIMESTAMP\nWHERE id IN (1,2,3,4,5,6)\nRETURNING\n    id,\n    company,\n    role,\n    followup_count,\n    last_followup_at,\n    next_followup_at,\n    followup_stopped;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2912,
+        -96
+      ],
+      "id": "fb0cafc8-0c39-49df-bceb-ba6ae6cedd87",
+      "name": "Execute a SQL query4",
+      "credentials": {
+        "postgres": {
+          "id": "Pt5dFfUb3aFZGP3E",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "1693532806",
+        "text": "=✅ FOLLOW-UP SENT  Company: {{ $json.company }} Role: {{ $json.role }}  Follow-up #{{ $json.followup_count }} has been sent successfully.  Next follow-up: {{ $json.next_followup_at }}",
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        3136,
+        -96
+      ],
+      "id": "914ccac0-8e29-4011-8953-e84516e80d0c",
+      "name": "Send a text message",
+      "webhookId": "20f34486-b843-489f-aca5-731ad8434c5a",
+      "credentials": {
+        "telegramApi": {
+          "id": "0ezMUHU9BreBXrn4",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE telegram_bot_state\nSET value = '{{ $('Code in JavaScript').all().map(item => Number(item.json.update_id)).filter(Number.isFinite).reduce((max, id) => Math.max(max, id), 0) }}'\nWHERE key = 'last_update_id'\nRETURNING *;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        3360,
+        -96
+      ],
+      "id": "7c943cef-eb77-44a4-87b0-7d53807d0963",
+      "name": "Update Telegram Offset",
+      "credentials": {
+        "postgres": {
+          "id": "Pt5dFfUb3aFZGP3E",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query1": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query2": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query3": {
+      "main": [
+        [
+          {
+            "node": "Get a thread",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get a thread": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Reply to a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reply to a message": {
+      "main": [
+        [
+          {
+            "node": "Mark Follow-Up as SENT",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mark Follow-Up as SENT": {
+      "main": [
+        [
+          {
+            "node": "Update Application Follow-Up State",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Application Follow-Up State": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query4",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query4": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a text message": {
+      "main": [
+        [
+          {
+            "node": "Update Telegram Offset",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "7cc45f3b-3d2b-413c-8c62-f911b1c25e2b",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "b00dffc82df2db4bc9d38df265b9983749ce079cc552724ffce66e85815baaad"
+  },
+  "nodeGroups": [],
+  "id": "us0UeNe49ToNxvy7",
+  "tags": []
+}

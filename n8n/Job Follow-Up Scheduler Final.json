@@ -1,0 +1,657 @@
+{
+  "name": "Job Follow-Up Scheduler Final",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "id": "f29fdd83-73cc-48a8-be06-dfd2fde9d71d",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n    id,\n    company,\n    role,\n    recipient_email,\n    recipient_name,\n    application_date,\n    gmail_thread_id,\n    status,\n    followup_count,\n    next_followup_at,\n    pause_follow_up,\n    followup_stopped,\n    source,\n    priority,\n    requires_action\nFROM job_applications\nWHERE status = 'ACTIVE'\n  AND pause_follow_up = FALSE\n  AND followup_stopped = FALSE\n  AND followup_count < 3\n  AND next_followup_at IS NOT NULL\n  AND next_followup_at <= CURRENT_TIMESTAMP\nORDER BY next_followup_at ASC;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        0
+      ],
+      "id": "458b572a-c809-45c0-8951-05f300553954",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "Pt5dFfUb3aFZGP3E",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "thread",
+        "operation": "get",
+        "threadId": "={{ $json.gmail_thread_id }}",
+        "options": {
+          "returnOnlyMessages": true
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        448,
+        0
+      ],
+      "id": "6b8c17b8-bc50-476d-a1bd-939574bdfe6a",
+      "name": "Get a thread",
+      "webhookId": "4fba700a-03cf-4007-be4b-1ea11f498769",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "UPicGKB2y8HA9tgM",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst MY_EMAIL = 'mohanrajramkumar56@gmail.com';\n\nfunction getHeader(headers, name) {\n  if (!Array.isArray(headers)) return '';\n\n  const header = headers.find(\n    h => String(h.name || '').toLowerCase() === name.toLowerCase()\n  );\n\n  return header?.value || '';\n}\n\nreturn items.map(item => {\n  const m = item.json;\n\n  // --------------------------------------------------\n  // 1. BASIC GMAIL IDENTIFIERS\n  // --------------------------------------------------\n\n  const gmailMessageId =\n    m.id ||\n    m.messageId ||\n    m.gmail_message_id ||\n    '';\n\n  const gmailThreadId =\n    m.threadId ||\n    m.thread_id ||\n    m.gmail_thread_id ||\n    '';\n\n  // --------------------------------------------------\n  // 2. SUBJECT / FROM / TO\n  // --------------------------------------------------\n\n  const subject =\n    m.subject ||\n    m.Subject ||\n    getHeader(m.headers, 'Subject') ||\n    '';\n\n  const from =\n    m.from ||\n    m.From ||\n    getHeader(m.headers, 'From') ||\n    '';\n\n  const to =\n    m.to ||\n    m.To ||\n    getHeader(m.headers, 'To') ||\n    '';\n\n  // --------------------------------------------------\n  // 3. MESSAGE CONTENT\n  // --------------------------------------------------\n\n  const snippet =\n    m.snippet ||\n    m.Snippet ||\n    '';\n\n  const body =\n    m.textPlain ||\n    m.text ||\n    m.body ||\n    m.textHtml ||\n    '';\n\n  const internalDate =\n    m.internalDate ||\n    m.internal_date ||\n    '';\n\n  // --------------------------------------------------\n  // 4. DETERMINE MESSAGE DIRECTION\n  // --------------------------------------------------\n\n  const fromLower = String(from).toLowerCase();\n\n  const isSentByMe =\n    fromLower.includes(MY_EMAIL.toLowerCase());\n\n  // --------------------------------------------------\n  // 5. DELIVERY FAILURE DETECTION\n  // --------------------------------------------------\n\n  const combinedText = (\n    String(subject) +\n    ' ' +\n    String(snippet) +\n    ' ' +\n    String(body) +\n    ' ' +\n    String(from)\n  ).toLowerCase();\n\n  const isDeliveryFailure =\n    combinedText.includes('address not found') ||\n    combinedText.includes('message wasn\\'t delivered') ||\n    combinedText.includes('message was not delivered') ||\n    combinedText.includes('couldn\\'t be delivered') ||\n    combinedText.includes('could not be delivered') ||\n    combinedText.includes('rejected your message') ||\n    combinedText.includes('delivery status notification') ||\n    combinedText.includes('undeliverable') ||\n    combinedText.includes('mailer-daemon') ||\n    combinedText.includes('postmaster') ||\n    combinedText.includes('550 5.1.1') ||\n    combinedText.includes('550 5.') ||\n    combinedText.includes('delivery failure');\n\n  // --------------------------------------------------\n  // 6. INCOMING MESSAGE\n  // --------------------------------------------------\n\n  const isIncoming =\n    !isSentByMe;\n\n  // --------------------------------------------------\n  // 7. FINAL CLEAN OUTPUT\n  // --------------------------------------------------\n\n  return {\n    json: {\n      gmail_message_id: gmailMessageId,\n      gmail_thread_id: gmailThreadId,\n\n      subject: subject,\n      from: from,\n      to: to,\n\n      snippet: snippet,\n      body: body,\n      internal_date: internalDate,\n\n      is_sent: isSentByMe,\n      is_incoming: isIncoming,\n      is_delivery_failure: isDeliveryFailure\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ],
+      "id": "7e9a33f4-46a1-4ae5-85b9-7bf8b2e78444",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are an AI email response classifier for a personal job application follow-up automation system.\n\nYour task is to analyze the current Gmail message and classify what happened after a job application.\n\nINPUT DATA\n\nSubject:\n{{ $json.subject }}\n\nFrom:\n{{ $json.from }}\n\nTo:\n{{ $json.to }}\n\nEmail Snippet:\n{{ $json.snippet }}\n\nIs Sent By Me:\n{{ $json.is_sent }}\n\nIs Incoming:\n{{ $json.is_incoming }}\n\nIs Delivery Failure:\n{{ $json.is_delivery_failure }}\n\n\nCLASSIFICATION\n\nChoose exactly ONE classification:\n\nNO_RESPONSE\nACKNOWLEDGEMENT\nINTERVIEW\nASSESSMENT\nREJECTION\nHR_RESPONSE\nACTION_REQUIRED\nDELIVERY_FAILURE\n\n\nRULES\n\n1. DELIVERY_FAILURE\nUse this when the email is a bounced, undeliverable, rejected, or failed delivery message.\n\nExamples:\n- Address not found\n- Message wasn't delivered\n- Couldn't be delivered\n- Delivery Status Notification\n- Undeliverable\n- Mailer-Daemon\n- Postmaster\n- SMTP delivery failure\n\n\n2. INTERVIEW\nUse this when the recruiter/company asks the candidate to attend, schedule, confirm, or discuss an interview.\n\nExamples:\n- Interview invitation\n- Technical interview\n- HR interview\n- Interview scheduling\n- Interview availability\n\n\n3. ASSESSMENT\nUse this when the recruiter/company asks the candidate to complete an assessment or technical task.\n\nExamples:\n- Coding assessment\n- Technical assessment\n- Online test\n- Assignment\n- Take-home task\n- Screening test\n\n\n4. REJECTION\nUse this when the company clearly rejects the application or confirms that the candidate will not proceed.\n\nExamples:\n- We decided not to proceed\n- Your application was unsuccessful\n- We are moving forward with other candidates\n- You were not selected\n\n\n5. ACTION_REQUIRED\nUse this when the company requires the candidate to take a specific action.\n\nExamples:\n- Submit documents\n- Share availability\n- Provide additional information\n- Confirm something\n- Complete a requested step\n\nDo NOT use ACTION_REQUIRED for a simple application acknowledgement.\n\n\n6. HR_RESPONSE\nUse this when the company/recruiter gives a meaningful application-related response, but it does not fit INTERVIEW, ASSESSMENT, REJECTION, or ACTION_REQUIRED.\n\nExamples:\n- Recruiter asks about experience\n- Recruiter discusses the role\n- Recruiter provides meaningful application status\n- Recruiter starts a conversation about the application\n\n\n7. ACKNOWLEDGEMENT\nUse this ONLY when the company simply confirms that the application/resume was received or will be reviewed.\n\nExamples:\n- We received your application\n- Thank you for applying\n- Your application has been received\n- We will review your application\n\nIMPORTANT:\nAn acknowledgement does NOT stop the follow-up process.\n\n\n8. NO_RESPONSE\nUse this when there is no meaningful recruiter/company response.\n\nAlso use this when the message is sent by the candidate and is simply the original application email.\n\n\nFOLLOW-UP DECISION\n\nINTERVIEW:\npause_follow_up = true\naction_required = true\n\nASSESSMENT:\npause_follow_up = true\naction_required = true\n\nREJECTION:\npause_follow_up = true\naction_required = false\n\nHR_RESPONSE:\npause_follow_up = true\naction_required = false\n\nACTION_REQUIRED:\npause_follow_up = true\naction_required = true\n\nDELIVERY_FAILURE:\npause_follow_up = true\naction_required = true\n\nACKNOWLEDGEMENT:\npause_follow_up = false\naction_required = false\n\nNO_RESPONSE:\npause_follow_up = false\naction_required = false\n\n\nIMPORTANT LOGIC\n\n- Do not classify an email as a meaningful response only because it comes from a company.\n- Read the actual message content.\n- A simple acknowledgement does not stop follow-up.\n- A rejection stops follow-up.\n- An interview invitation stops follow-up.\n- An assessment request stops follow-up.\n- A meaningful HR response stops follow-up.\n- A delivery failure stops follow-up and requires attention.\n- The original application email sent by the candidate is NOT a company response.\n- Never invent information that is not present in the email.\n\n\nOUTPUT FORMAT\n\nReturn ONLY valid JSON.\n\nDo not use Markdown.\nDo not use ```json.\nDo not add explanations outside the JSON.\n\nReturn exactly:\n\n{\n  \"classification\": \"ONE_CLASSIFICATION\",\n  \"action_required\": true,\n  \"pause_follow_up\": true,\n  \"reason\": \"Short explanation based only on the email\"\n}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        896,
+        0
+      ],
+      "id": "061a56ac-4d1f-4d85-931b-f7abe1779911",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "model": "qwen3:latest",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        768,
+        208
+      ],
+      "id": "b4acda91-da3f-446c-8e42-74d73c5454b5",
+      "name": "Ollama Chat Model",
+      "credentials": {
+        "ollamaApi": {
+          "id": "iUKvmcHsrcFYqske",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const aiItems = $input.all();\n\n// Get the original Gmail data from the FIRST Code node\nconst sourceItems = $('Code in JavaScript').all();\n\nreturn aiItems.map((item, index) => {\n  const source = sourceItems[index]?.json || {};\n\n  let result = {};\n\n  try {\n    result =\n      typeof item.json.output === 'string'\n        ? JSON.parse(item.json.output)\n        : item.json.output;\n  } catch (error) {\n    result = {\n      classification: 'NO_RESPONSE',\n      action_required: false,\n      pause_follow_up: false,\n      reason: 'AI output could not be parsed'\n    };\n  }\n\n  return {\n    json: {\n      gmail_message_id: source.gmail_message_id || '',\n      gmail_thread_id: source.gmail_thread_id || '',\n      subject: source.subject || '',\n      from: source.from || '',\n      to: source.to || '',\n      snippet: source.snippet || '',\n      body: source.body || '',\n      internal_date: source.internal_date || '',\n\n      is_sent: source.is_sent ?? false,\n      is_incoming: source.is_incoming ?? false,\n      is_delivery_failure: source.is_delivery_failure ?? false,\n\n      classification: result.classification || 'NO_RESPONSE',\n      action_required: result.action_required ?? false,\n      pause_follow_up: result.pause_follow_up ?? false,\n      reason: result.reason || ''\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1264,
+        0
+      ],
+      "id": "82941c17-4961-463b-ade1-55f36986d2d1",
+      "name": "Code in JavaScript1"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst groups = new Map();\n\nfor (const item of items) {\n  const data = item.json;\n\n  const threadId = data.gmail_thread_id;\n\n  // Skip records without a thread ID\n  if (!threadId) {\n    continue;\n  }\n\n  if (!groups.has(threadId)) {\n    groups.set(threadId, []);\n  }\n\n  groups.get(threadId).push(data);\n}\n\nconst results = [];\n\nfor (const [threadId, messages] of groups.entries()) {\n\n  // Sort oldest → newest\n  messages.sort((a, b) => {\n    const dateA = Number(a.internal_date || 0);\n    const dateB = Number(b.internal_date || 0);\n    return dateA - dateB;\n  });\n\n  // Find incoming messages only\n  const incomingMessages = messages.filter(\n    message => message.is_incoming === true\n  );\n\n  // Find meaningful responses\n  const meaningfulResponses = incomingMessages.filter(message =>\n    [\n      'INTERVIEW',\n      'ASSESSMENT',\n      'REJECTION',\n      'HR_RESPONSE',\n      'ACTION_REQUIRED',\n      'DELIVERY_FAILURE'\n    ].includes(message.classification)\n  );\n\n  // Find acknowledgements\n  const acknowledgements = incomingMessages.filter(\n    message => message.classification === 'ACKNOWLEDGEMENT'\n  );\n\n  let finalMessage = null;\n\n  /*\n   * Priority:\n   * 1. Meaningful company response\n   * 2. Delivery failure\n   * 3. Acknowledgement\n   * 4. No response\n   */\n\n  if (meaningfulResponses.length > 0) {\n\n    // Use the newest meaningful response\n    finalMessage =\n      meaningfulResponses[meaningfulResponses.length - 1];\n\n  } else if (acknowledgements.length > 0) {\n\n    // Only acknowledgement exists\n    finalMessage =\n      acknowledgements[acknowledgements.length - 1];\n\n  } else {\n\n    // No meaningful incoming response\n    finalMessage = {\n      classification: 'NO_RESPONSE',\n      action_required: false,\n      pause_follow_up: false,\n      reason: 'No meaningful company response found'\n    };\n  }\n\n  results.push({\n    json: {\n      gmail_thread_id: threadId,\n\n      // Original application information\n      subject:\n        messages[0].subject || '',\n\n      from:\n        messages[0].from || '',\n\n      to:\n        messages[0].to || '',\n\n      gmail_message_id:\n        messages[0].gmail_message_id || '',\n\n      // Final thread decision\n      classification:\n        finalMessage.classification,\n\n      action_required:\n        finalMessage.action_required,\n\n      pause_follow_up:\n        finalMessage.pause_follow_up,\n\n      reason:\n        finalMessage.reason || '',\n\n      // Useful tracking information\n      total_messages:\n        messages.length,\n\n      incoming_messages:\n        incomingMessages.length,\n\n      has_acknowledgement:\n        acknowledgements.length > 0,\n\n      has_meaningful_response:\n        meaningfulResponses.length > 0\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1488,
+        0
+      ],
+      "id": "b0ca4793-649a-4731-aee2-51d95078a5a2",
+      "name": "Code in JavaScript2"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "e753f718-54fc-40ba-8fbb-f55c487f2cac",
+              "leftValue": "={{ $json.pause_follow_up }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "false",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {
+          "ignoreCase": false
+        }
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1712,
+        0
+      ],
+      "id": "043e03e1-a058-419b-96d0-da8ff17e271a",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n    id,\n    company,\n    role,\n    recipient_email,\n    recipient_name,\n    application_date,\n    gmail_thread_id,\n    followup_count,\n    next_followup_at,\n    last_followup_at,\n    priority,\n    requires_action\nFROM job_applications\nWHERE gmail_thread_id = '{{ $json.gmail_thread_id }}';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1936,
+        0
+      ],
+      "id": "87ff392c-ca95-4054-94ec-6788a8e25ded",
+      "name": "Get Application Details",
+      "credentials": {
+        "postgres": {
+          "id": "Pt5dFfUb3aFZGP3E",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n  const app = item.json;\n\n  const followupCount = Number(app.followup_count || 0);\n  const attemptNumber = followupCount + 1;\n\n  const followupDays = {\n    1: 3,\n    2: 7,\n    3: 14\n  };\n\n  return {\n    json: {\n      ...app,\n      followup_attempt: attemptNumber,\n      followup_days: followupDays[attemptNumber] || null,\n      can_followup: attemptNumber <= 3\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        0
+      ],
+      "id": "bc166fbd-6ff8-4120-add7-ed9b53413494",
+      "name": "Determine Follow-Up Stage"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "32cd36b5-e9d1-496d-8b86-87f45615e7ea",
+              "leftValue": "={{ $json.can_followup }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        2608,
+        0
+      ],
+      "id": "21bc9a4f-8dbf-4768-bff6-63e16070e9be",
+      "name": "If1"
+    },
+    {
+      "parameters": {
+        "model": "qwen3:latest",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        2928,
+        112
+      ],
+      "id": "fb676e88-896c-4b3d-aa78-9b5daae92eab",
+      "name": "Ollama Chat Model1",
+      "credentials": {
+        "ollamaApi": {
+          "id": "iUKvmcHsrcFYqske",
+          "name": "Ollama account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=/no_think\n\n# ROLE\n\nYou are a professional job-application follow-up email generator.\n\nGenerate exactly ONE follow-up email for the existing job application provided in the input.\n\nUse ONLY the provided input data.\n\nNever invent, modify, shorten, or reinterpret the company, role, recipient, application ID, or Gmail thread ID.\n\nDo not explain your reasoning.\n\n# INPUT DATA\n\nApplication ID:\n{{ $json.id }}\n\nGmail Thread ID:\n{{ $json.gmail_thread_id }}\n\nFollow-up Attempt:\n{{ $json.followup_attempt }}\n\nCompany:\n{{ $json.company }}\n\nRole:\n{{ $json.role }}\n\nRecipient Email:\n{{ $json.recipient_email }}\n\nRecipient Name:\n{{ $json.recipient_name }}\n\n# IMPORTANT DATA RULES\n\n1. Preserve Application ID exactly.\n2. Preserve Gmail Thread ID exactly.\n3. Preserve Follow-up Attempt exactly.\n4. Preserve Company exactly.\n5. Preserve Role exactly.\n6. Preserve Recipient Email exactly.\n7. Preserve Recipient Name exactly.\n\nNever replace missing values with invented information.\n\n# COMPANY RULE\n\nIf Company is empty, null, or unavailable:\n\nDO NOT generate an email.\n\nReturn:\n\n{\n  \"application_id\": <input application_id>,\n  \"gmail_thread_id\": \"<input gmail_thread_id>\",\n  \"followup_attempt\": <input followup_attempt>,\n  \"company\": \"\",\n  \"role\": \"<input role>\",\n  \"recipient_email\": \"<input recipient_email>\",\n  \"recipient_name\": \"<input recipient_name>\",\n  \"subject\": \"\",\n  \"body\": \"\",\n  \"ai_valid\": false,\n  \"reason\": \"Company is missing\"\n}\n\nOtherwise continue.\n\n# ROLE RULE\n\nUse the exact Role value provided.\n\nDo NOT:\n- shorten it\n- rewrite it\n- simplify it\n- replace it with another role\n- remove words\n\nExample:\n\nInput:\nAI/ML Engineer / Generative AI Engineer\n\nOutput must mention exactly:\n\nAI/ML Engineer / Generative AI Engineer\n\n# RECIPIENT RULE\n\nIf Recipient Name is a real person's name, address them using the exact provided name.\n\nExample:\n\nRecipient Name:\nShubhangi Gauniyal\n\nUse:\n\nDear Shubhangi Gauniyal,\n\nDo NOT shorten names.\n\nIf Recipient Name is empty, null, \"Hiring Team\", \"HR\", \"hr\", or another generic label:\n\nUse:\n\nDear Hiring Team,\n\n# EMAIL CONTENT\n\nGenerate a short, professional follow-up email.\n\nThe email MUST:\n\n1. Address the recipient.\n2. Mention the exact company.\n3. Mention the exact role.\n4. Express continued interest.\n5. Politely ask for an update.\n6. Thank the recipient.\n7. End exactly with:\n\nBest regards,\nMohanraj R\n\n# EMAIL STYLE\n\nProfessional\nNatural\nWarm\nConcise\nConfident\nRespectful\n\nKeep the email around 70–110 words.\n\nDo not make every email identical.\n\nYou may naturally vary wording such as:\n\n\"I wanted to follow up...\"\n\"I am writing to follow up...\"\n\"I wanted to check in...\"\n\"I remain interested in the opportunity...\"\n\nBut never change the factual information.\n\n# DO NOT INVENT\n\nNever invent:\n\n- interview status\n- recruiter response\n- hiring status\n- qualifications\n- experience\n- achievements\n- salary\n- availability\n- deadlines\n- company information\n- recruiter information\n- application date\n\n# FORBIDDEN PHRASES\n\nNever use:\n\n\"I am eagerly waiting.\"\n\"I know you are busy.\"\n\"Please respond immediately.\"\n\"Kindly consider me.\"\n\"I hope you reviewed my application.\"\n\"I am still waiting for your response.\"\n\n# SUBJECT RULE\n\nCreate exactly ONE professional subject.\n\nThe subject MUST contain the exact Role.\n\nUse this format:\n\nFollow-Up on <EXACT ROLE> Application\n\nExample:\n\nRole:\nAI Engineer\n\nSubject:\nFollow-Up on AI Engineer Application\n\nIf the role is:\n\nAI/ML Engineer / Generative AI Engineer\n\nSubject must be:\n\nFollow-Up on AI/ML Engineer / Generative AI Engineer Application\n\nDo not shorten or rewrite the role.\n\n# OUTPUT FORMAT\n\nReturn ONLY ONE valid JSON object.\n\nNo Markdown.\nNo code block.\nNo explanation.\nNo array.\nNo extra text.\n\nReturn exactly this structure:\n\n{\n  \"application_id\": 0,\n  \"gmail_thread_id\": \"\",\n  \"followup_attempt\": 1,\n  \"company\": \"\",\n  \"role\": \"\",\n  \"recipient_email\": \"\",\n  \"recipient_name\": \"\",\n  \"subject\": \"\",\n  \"body\": \"\",\n  \"ai_valid\": true,\n  \"reason\": \"\"\n}\n\n# OUTPUT RULES\n\nFor a valid email:\n\n- application_id = exact input application ID\n- gmail_thread_id = exact input Gmail thread ID\n- followup_attempt = exact input follow-up attempt\n- company = exact input company\n- role = exact input role\n- recipient_email = exact input recipient email\n- recipient_name = exact input recipient name\n- subject = generated subject\n- body = generated email\n- ai_valid = true\n- reason = \"\"\n\nFor missing company:\n\n- subject = \"\"\n- body = \"\"\n- ai_valid = false\n- reason = \"Company is missing\"\n\n# FINAL VALIDATION\n\nBefore returning the JSON, verify:\n\n1. Exactly 11 keys exist.\n2. application_id is preserved.\n3. gmail_thread_id is preserved.\n4. followup_attempt is preserved.\n5. company is preserved.\n6. role is preserved.\n7. recipient_email is preserved.\n8. recipient_name is preserved.\n9. Subject contains the exact role.\n10. Body contains the exact company.\n11. Body contains the exact role.\n12. Signature is exactly:\n\nBest regards,\nMohanraj R\n\n13. No placeholders exist.\n14. No application date is included.\n15. No invented information exists.\n16. If company is missing, ai_valid is false.\n17. Output is valid JSON.",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        3056,
+        -96
+      ],
+      "id": "0f6c5daa-fb2d-40d3-88a7-cb8d2774967f",
+      "name": "Generate Follow-Up Email"
+    },
+    {
+      "parameters": {
+        "jsCode": "return $input.all().map(item => ({\n  json: {\n    id: item.json.id,\n    company: item.json.company,\n    role: item.json.role,\n    recipient_email: item.json.recipient_email,\n    recipient_name: item.json.recipient_name,\n    application_date: item.json.application_date,\n    gmail_thread_id: item.json.gmail_thread_id,\n    followup_count: item.json.followup_count,\n    followup_attempt: item.json.followup_attempt,\n    followup_days: item.json.followup_days,\n    can_followup: item.json.can_followup,\n    priority: item.json.priority,\n    requires_action: item.json.requires_action\n  }\n}));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2384,
+        0
+      ],
+      "id": "bb453559-7d2a-4848-ad86-3836ff33caf7",
+      "name": "repare Follow-Up Email Data"
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nreturn items.map(item => {\n  const raw = item.json.output || '';\n\n  let parsed;\n\n  try {\n    parsed = JSON.parse(raw);\n  } catch (error) {\n    return {\n      json: {\n        ai_valid: false,\n        reason: 'Invalid JSON returned by AI',\n        subject: '',\n        body: ''\n      }\n    };\n  }\n\n  return {\n    json: {\n      application_id: parsed.application_id,\n      gmail_thread_id: parsed.gmail_thread_id,\n      followup_attempt: parsed.followup_attempt,\n      company: parsed.company,\n      role: parsed.role,\n      recipient_email: parsed.recipient_email,\n      recipient_name: parsed.recipient_name,\n\n      subject: parsed.subject || '',\n      body: parsed.body || '',\n\n      ai_valid:\n        parsed.ai_valid === true &&\n        Boolean(parsed.application_id) &&\n        Boolean(parsed.gmail_thread_id) &&\n        Boolean(parsed.company) &&\n        Boolean(parsed.role) &&\n        Boolean(parsed.subject) &&\n        Boolean(parsed.body),\n\n      reason: parsed.reason || ''\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3424,
+        -96
+      ],
+      "id": "ccd93ce1-6836-4629-99cd-1f2441d159f0",
+      "name": "Code in JavaScript3"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "38df716f-c08f-49d6-80e5-f67e0e5688c0",
+              "leftValue": "={{ $json.ai_valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        3648,
+        -96
+      ],
+      "id": "5081c0a7-20c0-45de-b5d6-ee93b33bd186",
+      "name": "If2"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "UPDATE followups\nSET\n    generated_subject = '{{ $json.subject.replace(/'/g, \"''\") }}',\n    generated_body = '{{ $json.body.replace(/'/g, \"''\") }}'\nWHERE application_id = {{ $json.application_id }}\n  AND attempt_number = {{ $json.followup_attempt }}\n  AND status = 'PENDING'\nRETURNING *;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        3872,
+        -192
+      ],
+      "id": "3a7f4b64-1ae3-4796-aec1-1da0c90379c4",
+      "name": "Execute a SQL query2",
+      "credentials": {
+        "postgres": {
+          "id": "Pt5dFfUb3aFZGP3E",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "1693532806",
+        "text": "=🔔 JOB FOLLOW-UP APPROVAL\n\nApplication ID: {{ $json.application_id }}\nCompany: {{ $json.company }}\nRole: {{ $json.role }}\n\nRecipient:\n{{ $json.recipient_email }}\n\nSubject:\n{{ $json.generated_subject }}\n\nMessage:\n{{ $json.generated_body }}\n\nPlease review this follow-up before sending.",
+        "replyMarkup": "inlineKeyboard",
+        "inlineKeyboard": {
+          "rows": [
+            {
+              "row": {
+                "buttons": [
+                  {
+                    "text": "✅ APPROVE & SEND Callback Data: APPROVE",
+                    "additionalFields": {
+                      "callback_data": "=APPROVE:{{ $json.application_id }}"
+                    }
+                  },
+                  {
+                    "text": "⏭️ SKIP Callback Data: SKIP",
+                    "additionalFields": {
+                      "callback_data": "=SKIP:{{ $json.application_id }}"
+                    }
+                  }
+                ]
+              }
+            },
+            {},
+            {}
+          ]
+        },
+        "additionalFields": {}
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        4320,
+        -192
+      ],
+      "id": "90d32480-7776-4cd0-8527-62ff00a3ad9d",
+      "name": "Send a text message",
+      "webhookId": "09452b72-1011-4589-b728-9952046a3a80",
+      "credentials": {
+        "telegramApi": {
+          "id": "0ezMUHU9BreBXrn4",
+          "name": "Telegram account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT\n    f.application_id,\n    j.company,\n    j.role,\n    j.recipient_email,\n    j.recipient_name,\n    j.gmail_thread_id,\n    f.attempt_number AS followup_attempt,\n    f.generated_subject,\n    f.generated_body,\n    f.status\nFROM followups f\nJOIN job_applications j\n    ON j.id = f.application_id\nWHERE f.application_id = {{ $json.application_id }}\n  AND f.attempt_number = {{ $json.attempt_number }}\n  AND f.status = 'PENDING'\nLIMIT 1;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        4096,
+        -192
+      ],
+      "id": "47102b7d-2879-4069-89db-3ad756c0be09",
+      "name": "Execute a SQL query3",
+      "credentials": {
+        "postgres": {
+          "id": "Pt5dFfUb3aFZGP3E",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query": {
+      "main": [
+        [
+          {
+            "node": "Get a thread",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get a thread": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript1": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript2": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Get Application Details",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Application Details": {
+      "main": [
+        [
+          {
+            "node": "Determine Follow-Up Stage",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Determine Follow-Up Stage": {
+      "main": [
+        [
+          {
+            "node": "repare Follow-Up Email Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If1": {
+      "main": [
+        [
+          {
+            "node": "Generate Follow-Up Email",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Generate Follow-Up Email",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "repare Follow-Up Email Data": {
+      "main": [
+        [
+          {
+            "node": "If1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Follow-Up Email": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript3": {
+      "main": [
+        [
+          {
+            "node": "If2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If2": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query2": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query3",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Execute a SQL query3": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "d33d339f-1600-455d-ad02-e73fc84546be",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "b00dffc82df2db4bc9d38df265b9983749ce079cc552724ffce66e85815baaad"
+  },
+  "nodeGroups": [],
+  "id": "YxPOhPjRYnSydOUs",
+  "tags": []
+}
