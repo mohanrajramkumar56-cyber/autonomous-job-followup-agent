@@ -35,69 +35,41 @@ An **end-to-end automation** that:
 
 ## Architecture
 
-```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│   Scheduler     │────▶│  PostgreSQL DB   │◀───│   Dashboard     │
-│   (n8n cron)    │     │  (job_applications,│     │  (Streamlit)    │
-└────────┬────────┘     │   followups,     │     └─────────────────┘
-         │              │   telegram_bot_state)│
-         ▼              └────────┬─────────┘
-┌─────────────────┐             │
-│  Gmail API      │             │
-│  (fetch thread) │             │
-└────────┬────────┘             │
-         ▼                      │
-┌─────────────────┐             │
-│  Code Node      │             │
-│  (parse msg)    │             │
-└────────┬────────┘             │
-         ▼                      │
-┌─────────────────┐             │
-│  AI Agent       │─────────────┤
-│  (Ollama qwen3) │  classification
-└────────┬────────┘             │
-         ▼                      │
-┌─────────────────┐             │
-│  Aggregation    │             │
-│  (thread-level) │             │
-└────────┬────────┘             │
-         ▼                      │
-┌─────────────────┐             │
-│  Decision Logic │             │
-│  (pause/stop?)  │             │
-└────────┬────────┘             │
-         ▼                      │
-┌─────────────────┐             │
-│  Generate Email │             │
-│  (AI + template)│             │
-└────────┬────────┘             │
-         ▼                      │
-┌─────────────────┐             │
-│  Store PENDING  │─────────────┤
-│  in followups   │             │
-└────────┬────────┘             │
-         ▼                      │
-┌─────────────────┐             │
-│  Telegram Bot   │             │
-│  (approval)     │             │
-└────────┬────────┘             │
-         │                      │
-    ┌────┴────┐                 │
-    ▼         ▼                 │
- APPROVE   SKIP                 │
-    │         │                 │
-    ▼         ▼                 │
-┌─────────┐ ┌─────────┐         │
-│ Gmail   │ │ Update  │         │
-│ Reply   │ │ State   │         │
-└────┬────┘ └────┬────┘         │
-     │          │               │
-     └────┬─────┘               │
-          ▼                     │
-    ┌───────────┐               │
-    │ Telegram  │               │
-    │ Notify    │               │
-    └───────────┘               │
+```mermaid
+flowchart LR
+    subgraph "External Services"
+        Gmail[Gmail API]
+        Telegram[Telegram Bot]
+        Ollama[Ollama qwen3]
+    end
+
+    subgraph "n8n Workflows"
+        Scheduler[Scheduler<br/>Hourly Trigger]
+        Approval[Approval Handler<br/>10s Polling]
+    end
+
+    subgraph "Database (PostgreSQL)"
+        DB[(PostgreSQL<br/>job_applications<br/>followups<br/>telegram_bot_state)]
+    end
+
+    subgraph "Frontend"
+        Dashboard[Streamlit Dashboard<br/>Port 8501]
+    end
+
+    Scheduler -->|Query due apps| DB
+    Scheduler -->|Fetch thread| Gmail
+    Scheduler -->|Classify messages| Ollama
+    Scheduler -->|Generate email| Ollama
+    Scheduler -->|Store PENDING| DB
+    Scheduler -->|Request approval| Telegram
+
+    Approval -->|Poll callbacks| Telegram
+    Approval -->|Fetch pending| DB
+    Approval -->|Send reply| Gmail
+    Approval -->|Update state| DB
+    Approval -->|Notify| Telegram
+
+    DB <---> Dashboard
 ```
 
 ---
@@ -390,33 +362,22 @@ Access at `http://localhost:8501`
 
 ## Data Flow Summary
 
-```
-User applies to job
-       │
-       ▼
-Insert row into job_applications
-       │
-       ▼
-[Hourly] Scheduler queries due applications
-       │
-       ▼
-Fetch Gmail thread → Parse → AI classify
-       │
-       ▼
-Meaningful response? ──Yes──▶ Pause/Stop follow-ups
-       │No
-       ▼
-Generate follow-up email (AI)
-       │
-       ▼
-Store in followups (PENDING)
-       │
-       ▼
-Telegram: "Approve this follow-up?"
-       │
-       ├─ APPROVE ──▶ Reply in Gmail thread ──▶ Update counts/dates
-       │
-       └─ SKIP ─────▶ Mark skipped, no send
+```mermaid
+flowchart TD
+    A[User applies to job] --> B[Insert row into job_applications]
+    B --> C[Hourly: Scheduler queries due applications]
+    C --> D[Fetch Gmail thread]
+    D --> E[Parse messages]
+    E --> F[AI classify each message]
+    F --> G{Meaningful response?}
+    G -- Yes --> H[Pause/Stop follow-ups]
+    G -- No --> I[Generate follow-up email with AI]
+    I --> J[Store in followups (PENDING)]
+    J --> K[Telegram: Approve this follow-up?]
+    K --> L{User action}
+    L -- APPROVE --> M[Reply in Gmail thread]
+    M --> N[Update counts & dates]
+    L -- SKIP --> O[Mark skipped, no send]
 ```
 
 ---
