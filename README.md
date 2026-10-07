@@ -1,4 +1,4 @@
-# AI Job Follow-Up Agent
+﻿# AI Job Follow-Up Agent
 
 > **Automated job application follow-up system** — monitors Gmail threads, classifies responses with AI, generates personalized follow-up emails, and requires human approval via Telegram before sending.
 
@@ -448,5 +448,5 @@ Telegram: "Approve this follow-up?"
 
 ## License
 
-MIT — use freely for personal job search automation.#   a u t o n o m o u s - j o b - f o l l o w u p - a g e n t  
+MIT -- use freely for personal job search automation.
  
