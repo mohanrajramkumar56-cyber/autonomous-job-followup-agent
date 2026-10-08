@@ -410,4 +410,3 @@ flowchart TD
 ## License
 
 MIT -- use freely for personal job search automation.
- 
